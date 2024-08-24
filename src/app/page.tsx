@@ -1,113 +1,229 @@
-import Image from "next/image";
+"use client";
+import { ThemeToggle } from "@/components/theme-toggler";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { WORDS } from "@/data/words";
+import { cn } from "@/lib/utils";
+import { useEffect, useRef, useState } from "react";
+
+const nonCharacterKeys = [
+  "Shift",
+  "Control",
+  "Alt",
+  "Meta",
+  "CapsLock",
+  "Tab",
+  "Escape",
+  "ArrowLeft",
+  "ArrowUp",
+  "ArrowRight",
+  "ArrowDown",
+  "Enter",
+  "Backspace",
+  "Delete",
+  "Insert",
+  "Home",
+  "End",
+  "PageUp",
+  "PageDown",
+];
 
 export default function Home() {
+  const [words, setWords] = useState<string[]>([]);
+  const [cursor, setCursor] = useState({ wordIdx: 1, charIdx: 1 });
+  const [errors, setErrors] = useState<Set<string>>(new Set());
+  const [startTime, setStartTime] = useState(0);
+  const [wordLimit, setWordLimit] = useState(30);
+  const [gameEnded, setGameEnded] = useState(false);
+  const [wordPressTimings, setWordPressTimings] = useState<number[]>([0, 0]);
+
+  const cursorRef = useRef<HTMLDivElement>(null);
+
+  const updateCursor = () => {
+    const currWordRect = document
+      .getElementById(`word-${cursor.wordIdx}`)
+      ?.getBoundingClientRect();
+    if (!cursorRef.current || !currWordRect) return;
+    cursorRef.current.style.left = `calc(${currWordRect.left}px + ${cursor.charIdx}ch )`;
+    cursorRef.current.style.top = currWordRect.top + "px";
+  };
+  const startGame = () => {
+    setWords(WORDS.sort(() => Math.random() - 0.5).slice(0, wordLimit));
+    setWordPressTimings(new Array(wordLimit).fill(0));
+    setCursor({ wordIdx: 0, charIdx: 0 });
+    setStartTime(Date.now());
+  };
+  // TODO: game end 2 bar chala
+  // wps seems to be correct
+
+  const handleGameEnd = () => {
+    setGameEnded(true);
+    wordPressTimings.pop();
+    const diffMin =
+      (wordPressTimings.at(-1)! - wordPressTimings[0]) / (60 * 1000);
+    const wps = Math.round(wordLimit / diffMin);
+
+    console.log("game ended", wps, wordLimit, diffMin);
+  };
+
+  useEffect(() => {
+    startGame();
+    if (typeof window !== "undefined") {
+      document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") startGame();
+      });
+    }
+  }, [wordLimit]);
+  useEffect(() => {
+    if (words.length === 0) return;
+    const captureCharKey = (e: KeyboardEvent) => {
+      setCursor((prevCursor) => {
+        // backspace with shift
+        if (e.ctrlKey && e.key === "Backspace") {
+          const newWordIdx = Math.max(prevCursor.wordIdx - 1, 0);
+          const newCharIdx =
+            prevCursor.wordIdx === 0 ? 0 : words[newWordIdx].length;
+          return { wordIdx: newWordIdx, charIdx: newCharIdx };
+        }
+        //check backspace
+        else if (e.key === "Backspace") {
+          if (errors.has(`${prevCursor.wordIdx}:${prevCursor.charIdx - 1}`)) {
+            setErrors((errs) => {
+              const newSet = new Set(errs);
+              newSet.delete(`${prevCursor.wordIdx}:${prevCursor.charIdx - 1}`);
+              return newSet;
+            });
+          }
+          if (prevCursor.wordIdx === 0 && prevCursor.charIdx === 0)
+            return prevCursor;
+          else if (prevCursor.charIdx > 0) {
+            return { ...prevCursor, charIdx: prevCursor.charIdx - 1 };
+          } else if (prevCursor.charIdx === 0) {
+            return {
+              wordIdx: prevCursor.wordIdx - 1,
+              charIdx: words[prevCursor.wordIdx - 1].length,
+            };
+          }
+        } else if (!nonCharacterKeys.includes(e.key)) {
+          // bound the cursor to the end of the word
+          if (
+            cursor.wordIdx === words.length - 1 &&
+            cursor.charIdx === words[cursor.wordIdx].length
+          ) {
+            handleGameEnd();
+            return prevCursor;
+          }
+
+          // if cursor is at the end of the word and pressed space
+          if (
+            cursor.charIdx === words[cursor.wordIdx].length &&
+            e.key === " "
+          ) {
+            console.log("going to next word");
+            setWordPressTimings((p) => {
+              const foo = [...p];
+              foo[cursor.wordIdx] = Date.now();
+              return foo;
+            });
+            return { wordIdx: cursor.wordIdx + 1, charIdx: 0 };
+          }
+
+          // check if equal
+          const isCorrect = words[cursor.wordIdx][cursor.charIdx] === e.key;
+          const charDiv = document.getElementById(`word-${cursor.wordIdx}`)
+            ?.children[cursor.charIdx]! as HTMLDivElement;
+          if (!charDiv) return prevCursor;
+          setErrors((p) => {
+            if (isCorrect) {
+              const newSet = new Set(p);
+              newSet.delete(`${cursor.wordIdx}:${cursor.charIdx}`);
+              return newSet;
+            } else {
+              return p.add(`${cursor.wordIdx}:${cursor.charIdx}`);
+            }
+          });
+          return { ...prevCursor, charIdx: prevCursor.charIdx + 1 };
+        }
+        //check letter
+        return prevCursor; // return the same cursor if no changes
+      });
+    };
+    //check letter
+    document.addEventListener("keydown", captureCharKey);
+    return () => {
+      document.removeEventListener("keydown", captureCharKey);
+    };
+  }, [words, cursor]);
+  useEffect(() => {
+    updateCursor();
+    window.onresize = updateCursor;
+    return () => {
+      window.onresize = null;
+    };
+  }, [words, cursor]);
   return (
-    <main className="flex min-h-screen flex-col items-center justify-between p-24">
-      <div className="z-10 w-full max-w-5xl items-center justify-between font-mono text-sm lg:flex">
-        <p className="fixed left-0 top-0 flex w-full justify-center border-b border-gray-300 bg-gradient-to-b from-zinc-200 pb-6 pt-8 backdrop-blur-2xl dark:border-neutral-800 dark:bg-zinc-800/30 dark:from-inherit lg:static lg:w-auto  lg:rounded-xl lg:border lg:bg-gray-200 lg:p-4 lg:dark:bg-zinc-800/30">
-          Get started by editing&nbsp;
-          <code className="font-mono font-bold">src/app/page.tsx</code>
-        </p>
-        <div className="fixed bottom-0 left-0 flex h-48 w-full items-end justify-center bg-gradient-to-t from-white via-white dark:from-black dark:via-black lg:static lg:size-auto lg:bg-none">
-          <a
-            className="pointer-events-none flex place-items-center gap-2 p-8 lg:pointer-events-auto lg:p-0"
-            href="https://vercel.com?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            By{" "}
-            <Image
-              src="/vercel.svg"
-              alt="Vercel Logo"
-              className="dark:invert"
-              width={100}
-              height={24}
-              priority
+    <main className="flex min-h-screen flex-col items-center p-24">
+      <ThemeToggle />
+      <pre>{JSON.stringify(cursor, null, 2)}</pre>
+      <pre>{startTime}</pre>
+      {/* <pre>{JSON.stringify(wordPressTimings)}</pre> */}
+      <div className="flex flex-row gap-2">
+        {["10", "25", "50", "100"].map((limit) => (
+          <div key={limit}>
+            <input
+              type="radio"
+              name={limit}
+              value={limit}
+              id={limit}
+              checked={limit === wordLimit.toString()}
+              onChange={(e) => setWordLimit(+e.target.value)}
             />
-          </a>
+            <label htmlFor={limit}>{limit}</label>
+          </div>
+        ))}
+      </div>
+      {gameEnded ? (
+        <pre>Game endeed</pre>
+      ) : (
+        <div
+          className={cn(
+            "max-w-5xl my-16 flex flex-wrap text-3xl",
+            "font-mono tracking-wide"
+          )}
+        >
+          <div ref={cursorRef} className="absolute left-0 top-0 cursor"></div>
+          {words.map((word, wordIdx) => (
+            <div
+              key={wordIdx}
+              className={cn(
+                "h-fit mr-[1ch]",
+                wordIdx >= cursor.wordIdx ? "text-slate-700" : ""
+              )}
+              id={`word-${wordIdx}`}
+            >
+              {word.split("").map((ch, chIdx) => (
+                <span
+                  key={chIdx}
+                  id={"" + chIdx}
+                  className={cn(
+                    cursor.wordIdx === wordIdx
+                      ? chIdx >= cursor.charIdx
+                        ? "text-slate-700"
+                        : "text-slate-200"
+                      : "",
+                    errors.has(`${wordIdx}:${chIdx}`) ? "text-red-500" : ""
+                  )}
+                >
+                  {ch}
+                </span>
+              ))}
+            </div>
+          ))}
+          <Button onClick={() => console.log(errors)}> show errors</Button>
         </div>
-      </div>
-
-      <div className="relative z-[-1] flex place-items-center before:absolute before:h-[300px] before:w-full before:-translate-x-1/2 before:rounded-full before:bg-gradient-radial before:from-white before:to-transparent before:blur-2xl before:content-[''] after:absolute after:-z-20 after:h-[180px] after:w-full after:translate-x-1/3 after:bg-gradient-conic after:from-sky-200 after:via-blue-200 after:blur-2xl after:content-[''] before:dark:bg-gradient-to-br before:dark:from-transparent before:dark:to-blue-700 before:dark:opacity-10 after:dark:from-sky-900 after:dark:via-[#0141ff] after:dark:opacity-40 sm:before:w-[480px] sm:after:w-[240px] before:lg:h-[360px]">
-        <Image
-          className="relative dark:drop-shadow-[0_0_0.3rem_#ffffff70] dark:invert"
-          src="/next.svg"
-          alt="Next.js Logo"
-          width={180}
-          height={37}
-          priority
-        />
-      </div>
-
-      <div className="mb-32 grid text-center lg:mb-0 lg:w-full lg:max-w-5xl lg:grid-cols-4 lg:text-left">
-        <a
-          href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-          className="group rounded-lg border border-transparent px-5 py-4 transition-colors hover:border-gray-300 hover:bg-gray-100 hover:dark:border-neutral-700 hover:dark:bg-neutral-800/30"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <h2 className="mb-3 text-2xl font-semibold">
-            Docs{" "}
-            <span className="inline-block transition-transform group-hover:translate-x-1 motion-reduce:transform-none">
-              -&gt;
-            </span>
-          </h2>
-          <p className="m-0 max-w-[30ch] text-sm opacity-50">
-            Find in-depth information about Next.js features and API.
-          </p>
-        </a>
-
-        <a
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          className="group rounded-lg border border-transparent px-5 py-4 transition-colors hover:border-gray-300 hover:bg-gray-100 hover:dark:border-neutral-700 hover:dark:bg-neutral-800/30"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <h2 className="mb-3 text-2xl font-semibold">
-            Learn{" "}
-            <span className="inline-block transition-transform group-hover:translate-x-1 motion-reduce:transform-none">
-              -&gt;
-            </span>
-          </h2>
-          <p className="m-0 max-w-[30ch] text-sm opacity-50">
-            Learn about Next.js in an interactive course with&nbsp;quizzes!
-          </p>
-        </a>
-
-        <a
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-          className="group rounded-lg border border-transparent px-5 py-4 transition-colors hover:border-gray-300 hover:bg-gray-100 hover:dark:border-neutral-700 hover:dark:bg-neutral-800/30"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <h2 className="mb-3 text-2xl font-semibold">
-            Templates{" "}
-            <span className="inline-block transition-transform group-hover:translate-x-1 motion-reduce:transform-none">
-              -&gt;
-            </span>
-          </h2>
-          <p className="m-0 max-w-[30ch] text-sm opacity-50">
-            Explore starter templates for Next.js.
-          </p>
-        </a>
-
-        <a
-          href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-          className="group rounded-lg border border-transparent px-5 py-4 transition-colors hover:border-gray-300 hover:bg-gray-100 hover:dark:border-neutral-700 hover:dark:bg-neutral-800/30"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <h2 className="mb-3 text-2xl font-semibold">
-            Deploy{" "}
-            <span className="inline-block transition-transform group-hover:translate-x-1 motion-reduce:transform-none">
-              -&gt;
-            </span>
-          </h2>
-          <p className="m-0 max-w-[30ch] text-balance text-sm opacity-50">
-            Instantly deploy your Next.js site to a shareable URL with Vercel.
-          </p>
-        </a>
-      </div>
+      )}
     </main>
   );
 }
